@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package ratelimiter.v1;
+
+option go_package = "github.com/MTariq99/rate-limiter/proto/gen;ratelimiterpb";
+
+import "google/protobuf/timestamp.proto";
+
+
+enum Algorithm{
+    ALGORITHM_UNSPECIFIED = 0;
+    FIXED_WINDOW = 1;
+    SLIDING_LOG = 2;
+    SLIDING_WINDOW = 3;
+    TOKEN_BUCKET = 4;
+    LEAKY_BUCKET = 5;
+}
+
+enum LimitStatus{
+  LIMIT_STATUS_UNSPECIFIED = 0;
+  LIMIT_STATUS_ALLOWED     = 1;
+  LIMIT_STATUS_DENIED      = 2;
+  LIMIT_STATUS_ERROR       = 3;
+}
+
+message CheckLimitRequest{
+    string key = 1;
+    string tenant_id = 2;
+    int64 limit = 3;
+    int64 window_ms = 4;
+    Algorithm algorithm = 5;
+}
+
+message CheckLimitResponse{
+    LimitStatus status = 1;
+    bool allowed = 2;
+    int64 remaining=3;
+    int64 reset_after_ms=4;
+    int64 retry_after_ms=5;
+    int64 total_limit=6;
+    google.protobuf.Timestamp server_time =7;
+
+}
+
+// ─── BATCH CHECK ──────────────────────────────────────────
+message BatchCheckLimitRequest{
+    repeated CheckLimitRequest requests = 1;
+}
+message BatchCheckLimitResponse{
+    repeated CheckLimitResponse responses = 1;
+}
+
+
+message GetStatsRequest{
+    string key = 1;
+    string tenant_id = 2;
+}
+
+message GetStatsResponse {
+  string key              = 1;
+  int64  total_requests   = 2; // all time counter
+  int64  denied_requests  = 3;
+  int64  current_usage    = 4; // requests in current window
+  int64  window_ms        = 5;
+  google.protobuf.Timestamp last_request_at = 6;
+}
+
+message LimitRule {
+  string    rule_id    = 1;
+  string    tenant_id  = 2;
+  string    key_pattern = 3; // glob pattern e.g. "user:*" or "ip:10.*"
+  int64     limit      = 4;
+  int64     window_ms  = 5;
+  Algorithm algorithm  = 6;
+  bool      enabled    = 7;
+}
+
+message UpsertRuleRequest  {
+     LimitRule rule = 1;
+     }
+message UpsertRuleResponse { 
+    LimitRule rule = 1;
+     bool created = 2;
+     }
+
+message DeleteRuleRequest  {
+     string rule_id = 1;
+      string tenant_id = 2;
+     }
+message DeleteRuleResponse {
+     bool success = 1; 
+    }
+
+message ListRulesRequest   { 
+    string tenant_id = 1;
+ }
+message ListRulesResponse  { 
+    repeated LimitRule rules = 1;
+ }
+
+
+// ─── SERVICE DEFINITION ───────────────────────────────────
+
+// RateLimiter provides distributed rate limiting as a standalone gRPC service.
+// Consumers call CheckLimit on every incoming request to enforce traffic policies.
+service RateLimiter {
+
+  // CheckLimit evaluates a single request against the configured limit rule.
+  rpc CheckLimit (CheckLimitRequest) returns (CheckLimitResponse);
+
+  // BatchCheckLimit evaluates multiple keys in a single round trip.
+  // Use this when a single request needs to check per-IP + per-user + per-route limits simultaneously.
+  rpc BatchCheckLimit (BatchCheckLimitRequest) returns (BatchCheckLimitResponse);
+
+  // GetStats returns usage metrics for a given key within the current window.
+  rpc GetStats (GetStatsRequest) returns (GetStatsResponse);
+
+  // UpsertRule creates or updates a limit rule for a tenant.
+  rpc UpsertRule (UpsertRuleRequest) returns (UpsertRuleResponse);
+
+  // DeleteRule removes a limit rule by ID.
+  rpc DeleteRule (DeleteRuleRequest) returns (DeleteRuleResponse);
+
+  // ListRules returns all configured rules for a given tenant.
+  rpc ListRules (ListRulesRequest) returns (ListRulesResponse);
+}
+ 
